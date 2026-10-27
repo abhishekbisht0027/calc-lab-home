@@ -157,21 +157,42 @@ static void set_error(Parser *parser, size_t position)
     }
 }
 
+static Number parse_expression(Parser *parser);
+
 static Number parse_primary(Parser *parser)
 {
     Number result = {0};
 
-    if (parser->lexer.token.type != TOKEN_NUMBER) {
-        // This is the token where a number was needed.
-        set_error(parser, parser->lexer.token.position);
+    if (parser->lexer.token.type == TOKEN_NUMBER) {
+        result = parser->lexer.token.value;
+        next_token(&parser->lexer);
         return result;
     }
 
-    result = parser->lexer.token.value;
-    next_token(&parser->lexer);
+    if (parser->lexer.token.type == TOKEN_LEFT_PAREN) {
+        next_token(&parser->lexer);
+
+        // Read the whole expression inside the parentheses first.
+        result = parse_expression(parser);
+
+        if (parser->error_position) {
+            return result;
+        }
+
+        if (parser->lexer.token.type != TOKEN_RIGHT_PAREN) {
+            // Report the token where the closing parenthesis was needed.
+            set_error(parser, parser->lexer.token.position);
+            return result;
+        }
+
+        next_token(&parser->lexer);
+        return result;
+    }
+
+    // A number or opening parenthesis was needed at this position.
+    set_error(parser, parser->lexer.token.position);
     return result;
 }
-
 static Number parse_term(Parser *parser)
 {
     Number result = parse_primary(parser);
@@ -237,7 +258,7 @@ static Number parse_expression(Parser *parser)
 
 int main(void)
 {
-    const char input[] = "20 / 2 / 2";
+    const char input[] = "8 / (4 - 2 * 2)";
     Parser parser = {
         .lexer = {
             .text = input,
