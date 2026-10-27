@@ -65,7 +65,7 @@ static void next_token(Lexer *lexer)
         advance(lexer);
     }
 
-        // Skip comment text, but still count its characters.
+    // Skip comment text, but still count its characters.
     if (lexer->index < lexer->length &&
         lexer->text[lexer->index] == '#' &&
         !lexer->line_has_token) {
@@ -193,6 +193,7 @@ static void next_token(Lexer *lexer)
 typedef struct {
     Lexer lexer;
     size_t error_position;
+    int allocation_failed;
 } Parser;
 
 static void set_error(Parser *parser, size_t position)
@@ -308,68 +309,91 @@ static Number calculate(Parser *parser, Number left, Number right,
     return result;
 }
 
+typedef struct PowerEntry {
+    Number base;
+    size_t operator_position;
+    size_t exponent_position;
+    struct PowerEntry *next;
+} PowerEntry;
+
 static Number parse_power(Parser *parser)
 {
     Number result = parse_primary(parser);
+    PowerEntry *pending = NULL;
 
-    if (parser->error_position) {
-        return result;
-    }
-
-    if (parser->lexer.token.type == TOKEN_POWER) {
+    // Store the bases instead of adding a call for every power operator.
+    while (!parser->error_position &&
+           parser->lexer.token.type == TOKEN_POWER) {
         size_t operator_position = parser->lexer.token.position;
+        PowerEntry *entry = malloc(sizeof(*entry));
+
+        if (entry == NULL) {
+            parser->allocation_failed = 1;
+            set_error(parser, operator_position);
+            break;
+        }
+
         next_token(&parser->lexer);
 
-        size_t exponent_position = parser->lexer.token.position;
+        entry->base = result;
+        entry->operator_position = operator_position;
+        entry->exponent_position = parser->lexer.token.position;
+        entry->next = pending;
+        pending = entry;
 
-        // Calling this function again makes 2**3**2 mean 2**(3**2).
-        Number exponent = parse_power(parser);
+        result = parse_primary(parser);
+    }
 
-        if (parser->error_position) {
-            return result;
-        }
+    // Last stored means first evaluated: 2**3**2 becomes 2**(3**2).
+    while (pending != NULL) {
+        PowerEntry *entry = pending;
+        pending = entry->next;
 
-        // A float on either side means negative exponents are allowed.
-        if (result.is_float || exponent.is_float) {
-            double answer = pow(as_double(result), as_double(exponent));
+        if (!parser->error_position) {
+            Number base = entry->base;
+            Number exponent = result;
 
-            if (!isfinite(answer)) {
-                // Infinite or NaN results point to the power operator.
-                set_error(parser, operator_position);
-                return result;
+            // Either float operand makes this a double operation.
+            if (base.is_float || exponent.is_float) {
+                double answer = pow(as_double(base), as_double(exponent));
+
+                if (!isfinite(answer)) {
+                    // Infinite and NaN results point to the operator.
+                    set_error(parser, entry->operator_position);
+                } else {
+                    result = (Number){
+                        .is_float = 1,
+                        .decimal = answer
+                    };
+                }
+            } else if (exponent.integer < 0) {
+                // Integer powers report a negative exponent where it starts.
+                set_error(parser, entry->exponent_position);
+            } else {
+                long long factor = base.integer;
+                long long power = exponent.integer;
+                long long answer = 1;
+
+                // Squaring avoids one multiplication per exponent step.
+                while (power > 0) {
+                    if (power % 2 != 0) {
+                        answer *= factor;
+                    }
+
+                    power /= 2;
+
+                    if (power > 0) {
+                        factor *= factor;
+                    }
+                }
+
+                // Starting at 1 also gives the required answer for 0**0.
+                result = (Number){.integer = answer};
             }
-
-            result.is_float = 1;
-            result.decimal = answer;
-            return result;
         }
 
-        if (exponent.integer < 0) {
-            // Only integer powers reject a negative exponent.
-            set_error(parser, exponent_position);
-            return result;
-        }
-
-        long long base = result.integer;
-        long long power = exponent.integer;
-        long long answer = 1;
-
-        // Squaring avoids multiplying once for every exponent step.
-        while (power > 0) {
-            if (power % 2 != 0) {
-                answer *= base;
-            }
-
-            power /= 2;
-
-            // Avoid an unnecessary square after the last step.
-            if (power > 0) {
-                base *= base;
-            }
-        }
-
-        // Starting at 1 also handles the required 0**0 case.
-        result.integer = answer;
+        // Free pending entries even if parsing or arithmetic failed.
+        free(entry);
     }
 
     return result;
@@ -568,6 +592,12 @@ static int evaluate_input(const char *input, size_t length, FILE *output)
         }
 
         results[count++] = result;
+    }
+
+    if (parser.allocation_failed) {
+        fprintf(stderr, "Not enough memory for power expression\n");
+        free(results);
+        return 1;
     }
 
     // Wait until the whole file is checked so errors leave no partial results.
