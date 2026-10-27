@@ -144,31 +144,84 @@ static void next_token(Lexer *lexer)
     }
 }
 
+typedef struct {
+    Lexer lexer;
+    size_t error_position;
+} Parser;
+
+static void set_error(Parser *parser, size_t position)
+{
+    // Keep the first error so later checks do not replace it.
+    if (parser->error_position == 0) {
+        parser->error_position = position;
+    }
+}
+
+static Number parse_primary(Parser *parser)
+{
+    Number result = {0};
+
+    if (parser->lexer.token.type != TOKEN_NUMBER) {
+        // This is the token where a number was needed.
+        set_error(parser, parser->lexer.token.position);
+        return result;
+    }
+
+    result = parser->lexer.token.value;
+    next_token(&parser->lexer);
+    return result;
+}
+
+static Number parse_expression(Parser *parser)
+{
+    Number result = parse_primary(parser);
+
+    // Work left to right because 7 - 2 - 1 means (7 - 2) - 1.
+    while (!parser->error_position &&
+           (parser->lexer.token.type == TOKEN_PLUS ||
+            parser->lexer.token.type == TOKEN_MINUS)) {
+        TokenType operation = parser->lexer.token.type;
+        next_token(&parser->lexer);
+
+        Number right = parse_primary(parser);
+
+        if (parser->error_position) {
+            return result;
+        }
+
+        if (operation == TOKEN_PLUS) {
+            result.integer += right.integer;
+        } else {
+            result.integer -= right.integer;
+        }
+    }
+
+    return result;
+}
+
 int main(void)
 {
-    const char input[] = "# note\n  2 + 3\n4 #";
-    Lexer lexer = {
-        .text = input,
-        .length = sizeof(input) - 1,
-        .index = 0
+    const char input[] = "10 + - 3";
+    Parser parser = {
+        .lexer = {
+            .text = input,
+            .length = sizeof(input) - 1
+        }
     };
 
-    for (;;) {
-        next_token(&lexer);
+    next_token(&parser.lexer);
+    Number result = parse_expression(&parser);
 
-        if (lexer.token.type == TOKEN_END_FILE) {
-            break;
-        }
+    if (!parser.error_position &&
+        parser.lexer.token.type != TOKEN_END_FILE) {
+        // Any leftover token means the expression is not complete.
+        set_error(&parser, parser.lexer.token.position);
+    }
 
-        if (lexer.token.type == TOKEN_NUMBER) {
-            printf("Number %lld at %zu\n",
-                   lexer.token.value.integer,
-                   lexer.token.position);
-        } else {
-            printf("Token %d at %zu\n",
-                   (int)lexer.token.type,
-                   lexer.token.position);
-        }
+    if (parser.error_position) {
+        printf("ERROR:%zu\n", parser.error_position);
+    } else {
+        printf("%lld\n", result.integer);
     }
 
     return 0;
