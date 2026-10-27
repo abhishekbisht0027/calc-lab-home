@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 typedef enum {
     TOKEN_NUMBER,
@@ -235,6 +236,74 @@ static Number parse_primary(Parser *parser)
     return result;
 }
 
+static double as_double(Number number)
+{
+    return number.is_float ? number.decimal : (double)number.integer;
+}
+
+static Number calculate(Parser *parser, Number left, Number right,
+                        TokenType operation, size_t operator_position,
+                        size_t right_position)
+{
+    Number result = {0};
+
+    if (operation == TOKEN_DIVIDE &&
+        (right.is_float ? right.decimal == 0.0 : right.integer == 0)) {
+        // Division by zero points to the start of the right operand.
+        set_error(parser, right_position);
+        return result;
+    }
+
+    // One float operand makes the whole operation use double arithmetic.
+    if (left.is_float || right.is_float) {
+        double a = as_double(left);
+        double b = as_double(right);
+        result.is_float = 1;
+
+        switch (operation) {
+            case TOKEN_PLUS:
+                result.decimal = a + b;
+                break;
+            case TOKEN_MINUS:
+                result.decimal = a - b;
+                break;
+            case TOKEN_MULTIPLY:
+                result.decimal = a * b;
+                break;
+            case TOKEN_DIVIDE:
+                result.decimal = a / b;
+                break;
+            default:
+                break;
+        }
+
+        if (!isfinite(result.decimal)) {
+            // An invalid float result is reported at its operator.
+            set_error(parser, operator_position);
+        }
+    } else {
+        // Keep integers as long long so division keeps its integer rules.
+        switch (operation) {
+            case TOKEN_PLUS:
+                result.integer = left.integer + right.integer;
+                break;
+            case TOKEN_MINUS:
+                result.integer = left.integer - right.integer;
+                break;
+            case TOKEN_MULTIPLY:
+                result.integer = left.integer * right.integer;
+                break;
+            case TOKEN_DIVIDE:
+                result.integer = left.integer / right.integer;
+                break;
+            default:
+                break;
+        }
+    }
+
+    return result;
+}
+
 static Number parse_power(Parser *parser)
 {
     Number result = parse_primary(parser);
@@ -294,6 +363,7 @@ static Number parse_term(Parser *parser)
            (parser->lexer.token.type == TOKEN_MULTIPLY ||
             parser->lexer.token.type == TOKEN_DIVIDE)) {
         TokenType operation = parser->lexer.token.type;
+        size_t operator_position = parser->lexer.token.position;
         next_token(&parser->lexer);
 
         size_t right_position = parser->lexer.token.position;
@@ -303,18 +373,8 @@ static Number parse_term(Parser *parser)
             return result;
         }
 
-        if (operation == TOKEN_MULTIPLY) {
-            result.integer *= right.integer;
-        } else {
-            if (right.integer == 0) {
-                // The assignment puts this error at the right operand.
-                set_error(parser, right_position);
-                return result;
-            }
-
-            // Integer division in C already truncates toward zero.
-            result.integer /= right.integer;
-        }
+        result = calculate(parser, result, right, operation,
+                           operator_position, right_position);
     }
 
     return result;
@@ -322,7 +382,7 @@ static Number parse_term(Parser *parser)
 
 static Number parse_expression(Parser *parser)
 {
-    // Finish each multiplication or division before adding or subtracting.
+    // Finish multiplication and division before addition and subtraction.
     Number result = parse_term(parser);
 
     // Work left to right because 7 - 2 - 1 means (7 - 2) - 1.
@@ -330,19 +390,18 @@ static Number parse_expression(Parser *parser)
            (parser->lexer.token.type == TOKEN_PLUS ||
             parser->lexer.token.type == TOKEN_MINUS)) {
         TokenType operation = parser->lexer.token.type;
+        size_t operator_position = parser->lexer.token.position;
         next_token(&parser->lexer);
 
+        size_t right_position = parser->lexer.token.position;
         Number right = parse_term(parser);
 
         if (parser->error_position) {
             return result;
         }
 
-        if (operation == TOKEN_PLUS) {
-            result.integer += right.integer;
-        } else {
-            result.integer -= right.integer;
-        }
+        result = calculate(parser, result, right, operation,
+                           operator_position, right_position);
     }
 
     return result;
@@ -350,7 +409,7 @@ static Number parse_expression(Parser *parser)
 
 int main(void)
 {
-    const char input[] = "1.5e3";
+    const char input[] = "0.1 + 0.2";
     Parser parser = {
         .lexer = {
             .text = input,
