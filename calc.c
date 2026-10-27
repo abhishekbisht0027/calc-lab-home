@@ -695,6 +695,58 @@ static int process_file(const char *input_path, const char *output_directory)
     return status;
 }
 
+static char *default_output_directory(const char *input_path,
+                                      int directory_mode)
+{
+    char *copy = malloc(strlen(input_path) + 1);
+
+    if (copy == NULL) {
+        fprintf(stderr, "Not enough memory for default directory\n");
+        return NULL;
+    }
+
+    strcpy(copy, input_path);
+    size_t length = strlen(copy);
+
+    // Ignore trailing slashes when taking a folder's name.
+    while (length > 1 && copy[length - 1] == '/') {
+        copy[--length] = '\0';
+    }
+
+    char *base = strrchr(copy, '/');
+    base = base == NULL ? copy : base + 1;
+
+    size_t base_length = strlen(base);
+
+    // Strip .txt for a file, but keep a directory's full name.
+    if (!directory_mode && base_length >= 4 &&
+        strcmp(base + base_length - 4, ".txt") == 0) {
+        base[base_length - 4] = '\0';
+    }
+
+    int needed = snprintf(NULL, 0, "%s_abhishek_241ADB121", base);
+
+    if (needed < 0) {
+        fprintf(stderr, "Could not create default directory name\n");
+        free(copy);
+        return NULL;
+    }
+
+    char *directory = malloc((size_t)needed + 1);
+
+    if (directory == NULL) {
+        fprintf(stderr, "Not enough memory for default directory\n");
+        free(copy);
+        return NULL;
+    }
+
+    snprintf(directory, (size_t)needed + 1,
+             "%s_abhishek_241ADB121", base);
+
+    free(copy);
+    return directory;
+}
+
 int main(int argc, char *argv[])
 {
     const char *input_path = NULL;
@@ -722,14 +774,29 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (input_path == NULL || output_directory == NULL) {
-        fprintf(stderr, "Usage: %s -o OUTDIR input.txt\n", argv[0]);
+    if (input_path == NULL) {
+        fprintf(stderr, "Usage: %s [-o OUTDIR] input.txt\n", argv[0]);
         return 1;
+    }
+
+    char *default_directory = NULL;
+
+    if (output_directory == NULL) {
+        default_directory = default_output_directory(input_path, 0);
+
+        if (default_directory == NULL) {
+            return 1;
+        }
+
+        output_directory = default_directory;
     }
 
     if (create_output_directory(output_directory) != 0) {
+        free(default_directory);
         return 1;
     }
 
-    return process_file(input_path, output_directory);
+    int status = process_file(input_path, output_directory);
+    free(default_directory);
+    return status;
 }
