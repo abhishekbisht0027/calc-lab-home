@@ -99,7 +99,14 @@ static void next_token(Lexer *lexer)
             lexer->token.type = TOKEN_MINUS;
             break;
         case '*':
-            lexer->token.type = TOKEN_MULTIPLY;
+            // Only two adjacent stars form the power operator.
+            if (lexer->index < lexer->length &&
+                lexer->text[lexer->index] == '*') {
+                advance(lexer);
+                lexer->token.type = TOKEN_POWER;
+            } else {
+                lexer->token.type = TOKEN_MULTIPLY;
+            }
             break;
         case '/':
             lexer->token.type = TOKEN_DIVIDE;
@@ -121,7 +128,7 @@ static void next_token(Lexer *lexer)
 
 int main(void)
 {
-    const char input[] = "12 + 3";
+    const char input[] = "2 ** 3 * 4";
     Lexer lexer = {
         .text = input,
         .length = sizeof(input) - 1,
