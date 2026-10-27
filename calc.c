@@ -9,6 +9,33 @@
 
 #include <stdio.h>
 
+typedef enum {
+    TOKEN_NUMBER,
+    TOKEN_PLUS,
+    TOKEN_MINUS,
+    TOKEN_MULTIPLY,
+    TOKEN_DIVIDE,
+    TOKEN_POWER,
+    TOKEN_LEFT_PAREN,
+    TOKEN_RIGHT_PAREN,
+    TOKEN_END_LINE,
+    TOKEN_END_FILE,
+    TOKEN_INVALID
+} TokenType;
+
+typedef struct {
+    int is_float;
+    long long integer;
+    double decimal;
+} Number;
+
+typedef struct {
+    TokenType type;
+    Number value;
+    // Save where the token starts so we can report the error position later.
+    size_t position;
+} Token;
+
 int main(void)
 {
     return 0;
