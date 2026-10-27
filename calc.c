@@ -497,6 +497,102 @@ static char *read_file(const char *path, size_t *length)
     return text;
 }
 
+static int evaluate_input(const char *input, size_t length, FILE *output)
+{
+    Parser parser = {
+        .lexer = {
+            .text = input,
+            .length = length
+        }
+    };
+
+    Number *results = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+
+    next_token(&parser.lexer);
+
+    while (parser.lexer.token.type != TOKEN_END_FILE) {
+        // Blank lines and skipped comment lines have no result.
+        if (parser.lexer.token.type == TOKEN_END_LINE) {
+            next_token(&parser.lexer);
+            continue;
+        }
+
+        Number result = parse_expression(&parser);
+
+        if (parser.error_position) {
+            break;
+        }
+
+        if (parser.lexer.token.type != TOKEN_END_LINE &&
+            parser.lexer.token.type != TOKEN_END_FILE) {
+            // An expression must finish before another line begins.
+            set_error(&parser, parser.lexer.token.position);
+            break;
+        }
+
+        if (count == capacity) {
+            size_t max_count = (size_t)-1 / sizeof(*results);
+
+            if (capacity > max_count / 2) {
+                fprintf(stderr, "Too many results\n");
+                free(results);
+                return 1;
+            }
+
+            // Growing in larger steps avoids copying after every result.
+            size_t new_capacity = capacity == 0 ? 64 : capacity * 2;
+
+            if (new_capacity > max_count) {
+                fprintf(stderr, "Too many results\n");
+                free(results);
+                return 1;
+            }
+
+            Number *larger = realloc(results,
+                                     new_capacity * sizeof(*results));
+
+            if (larger == NULL) {
+                fprintf(stderr, "Not enough memory for results\n");
+                free(results);
+                return 1;
+            }
+
+            results = larger;
+            capacity = new_capacity;
+        }
+
+        results[count++] = result;
+    }
+
+    // Wait until the whole file is checked so errors leave no partial results.
+    if (parser.error_position) {
+        fprintf(output, "ERROR:%zu\n", parser.error_position);
+    } else {
+        for (size_t i = 0; i < count; i++) {
+            if (results[i].is_float) {
+                fprintf(output, "%.15g\n", results[i].decimal);
+            } else {
+                fprintf(output, "%lld\n", results[i].integer);
+            }
+
+            if (ferror(output)) {
+                break;
+            }
+        }
+    }
+
+    free(results);
+
+    if (ferror(output)) {
+        fprintf(stderr, "Could not write results\n");
+        return 1;
+    }
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2) {
@@ -511,35 +607,13 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    Parser parser = {
-        .lexer = {
-            .text = input,
-            .length = length
-        }
-    };
-
-    next_token(&parser.lexer);
-    Number result = parse_expression(&parser);
-
-    // A final newline is allowed after the expression.
-    while (!parser.error_position &&
-           parser.lexer.token.type == TOKEN_END_LINE) {
-        next_token(&parser.lexer);
-    }
-
-    if (!parser.error_position &&
-        parser.lexer.token.type != TOKEN_END_FILE) {
-        set_error(&parser, parser.lexer.token.position);
-    }
-
-    if (parser.error_position) {
-        printf("ERROR:%zu\n", parser.error_position);
-    } else if (result.is_float) {
-        printf("%.15g\n", result.decimal);
-    } else {
-        printf("%lld\n", result.integer);
-    }
-
+    int status = evaluate_input(input, length, stdout);
     free(input);
-    return 0;
+
+    if (fflush(stdout) != 0) {
+        fprintf(stderr, "Could not write results\n");
+        return 1;
+    }
+
+    return status;
 }
