@@ -40,6 +40,7 @@ typedef struct {
     const char *text;
     size_t length;
     size_t index;
+    int line_has_token;
     Token token;
 } Lexer;
 
@@ -58,6 +59,16 @@ static void next_token(Lexer *lexer)
         advance(lexer);
     }
 
+        // Skip comment text, but still count its characters.
+    if (lexer->index < lexer->length &&
+        lexer->text[lexer->index] == '#' &&
+        !lexer->line_has_token) {
+        while (lexer->index < lexer->length &&
+               lexer->text[lexer->index] != '\n') {
+            advance(lexer);
+        }
+    }
+
     lexer->token = (Token){0};
 
     // The index starts at 0, but file positions start at 1.
@@ -69,6 +80,13 @@ static void next_token(Lexer *lexer)
     }
 
     char c = lexer->text[lexer->index];
+
+    // Reset at each newline so the next line can start with a comment.
+    if (c == '\n') {
+        lexer->line_has_token = 0;
+    } else {
+        lexer->line_has_token = 1;
+    }
 
     if (c >= '0' && c <= '9') {
         long long value = 0;
@@ -128,7 +146,7 @@ static void next_token(Lexer *lexer)
 
 int main(void)
 {
-    const char input[] = "2 ** 3 * 4";
+    const char input[] = "# note\n  2 + 3\n4 #";
     Lexer lexer = {
         .text = input,
         .length = sizeof(input) - 1,
