@@ -193,9 +193,60 @@ static Number parse_primary(Parser *parser)
     set_error(parser, parser->lexer.token.position);
     return result;
 }
-static Number parse_term(Parser *parser)
+
+static Number parse_power(Parser *parser)
 {
     Number result = parse_primary(parser);
+    if (parser->error_position) {
+        return result;
+    }
+
+    if (parser->lexer.token.type == TOKEN_POWER) {
+        next_token(&parser->lexer);
+        size_t exponent_position = parser->lexer.token.position;
+
+        // Calling this function again makes 2**3**2 mean 2**(3**2).
+        Number exponent = parse_power(parser);
+
+        if (parser->error_position) {
+            return result;
+        }
+
+        if (exponent.integer < 0) {
+            // A negative integer exponent is reported where it starts.
+            set_error(parser, exponent_position);
+            return result;
+        }
+
+        long long base = result.integer;
+        long long power = exponent.integer;
+        long long answer = 1;
+
+        // Squaring the base avoids multiplying once for every exponent step.
+        while (power > 0) {
+            if (power % 2 != 0) {
+                answer *= base;
+            }
+
+            power /= 2;
+
+            // No final square is needed once the exponent is used up.
+            if (power > 0) {
+                base *= base;
+            }
+        }
+
+        // Starting at 1 also gives the required answer for 0**0.
+        result.integer = answer;
+    }
+
+    return result;
+}
+
+static Number parse_term(Parser *parser)
+{
+    // Evaluate powers before multiplication and division.
+    Number result = parse_power(parser);
 
     // Work left to right so 20 / 2 / 2 gives 5.
     while (!parser->error_position &&
@@ -205,7 +256,7 @@ static Number parse_term(Parser *parser)
         next_token(&parser->lexer);
 
         size_t right_position = parser->lexer.token.position;
-        Number right = parse_primary(parser);
+        Number right = parse_power(parser);
 
         if (parser->error_position) {
             return result;
@@ -258,7 +309,7 @@ static Number parse_expression(Parser *parser)
 
 int main(void)
 {
-    const char input[] = "8 / (4 - 2 * 2)";
+    const char input[] = "5 ** 0 + 0 ** 0";
     Parser parser = {
         .lexer = {
             .text = input,
