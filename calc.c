@@ -172,9 +172,45 @@ static Number parse_primary(Parser *parser)
     return result;
 }
 
-static Number parse_expression(Parser *parser)
+static Number parse_term(Parser *parser)
 {
     Number result = parse_primary(parser);
+
+    // Work left to right so 20 / 2 / 2 gives 5.
+    while (!parser->error_position &&
+           (parser->lexer.token.type == TOKEN_MULTIPLY ||
+            parser->lexer.token.type == TOKEN_DIVIDE)) {
+        TokenType operation = parser->lexer.token.type;
+        next_token(&parser->lexer);
+
+        size_t right_position = parser->lexer.token.position;
+        Number right = parse_primary(parser);
+
+        if (parser->error_position) {
+            return result;
+        }
+
+        if (operation == TOKEN_MULTIPLY) {
+            result.integer *= right.integer;
+        } else {
+            if (right.integer == 0) {
+                // The assignment puts this error at the right operand.
+                set_error(parser, right_position);
+                return result;
+            }
+
+            // Integer division in C already truncates toward zero.
+            result.integer /= right.integer;
+        }
+    }
+
+    return result;
+}
+
+static Number parse_expression(Parser *parser)
+{
+    // Finish each multiplication or division before adding or subtracting.
+    Number result = parse_term(parser);
 
     // Work left to right because 7 - 2 - 1 means (7 - 2) - 1.
     while (!parser->error_position &&
@@ -183,7 +219,7 @@ static Number parse_expression(Parser *parser)
         TokenType operation = parser->lexer.token.type;
         next_token(&parser->lexer);
 
-        Number right = parse_primary(parser);
+        Number right = parse_term(parser);
 
         if (parser->error_position) {
             return result;
@@ -201,7 +237,7 @@ static Number parse_expression(Parser *parser)
 
 int main(void)
 {
-    const char input[] = "10 + - 3";
+    const char input[] = "20 / 2 / 2";
     Parser parser = {
         .lexer = {
             .text = input,
