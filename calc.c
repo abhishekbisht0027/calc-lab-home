@@ -36,7 +36,34 @@ typedef struct {
     size_t position;
 } Token;
 
+typedef struct {
+    const char *text;
+    size_t length;
+    size_t index;
+    Token token;
+} Lexer;
+
+static void advance(Lexer *lexer)
+{
+    if (lexer->index < lexer->length) {
+        lexer->index++;
+    }
+}
+
 int main(void)
 {
+    Lexer lexer = {
+        .text = "12 + 3",
+        .length = 6,
+        .index = 0
+    };
+
+    // Count spaces too because error positions include every character.
+    while (lexer.index < lexer.length) {
+        printf("%c: %zu\n",
+               lexer.text[lexer.index], lexer.index + 1);
+        advance(&lexer);
+    }
+
     return 0;
 }
