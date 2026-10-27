@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
 
 typedef enum {
     TOKEN_NUMBER,
@@ -593,27 +596,140 @@ static int evaluate_input(const char *input, size_t length, FILE *output)
     return 0;
 }
 
-int main(int argc, char *argv[])
+static int create_output_directory(const char *path)
 {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s input.txt\n", argv[0]);
+    if (mkdir(path, 0777) == 0) {
+        return 0;
+    }
+
+    if (errno == EEXIST) {
+        struct stat info;
+
+        if (stat(path, &info) == 0 && S_ISDIR(info.st_mode)) {
+            return 0;
+        }
+
+        fprintf(stderr, "Output path is not a directory: %s\n", path);
         return 1;
     }
 
+    perror(path);
+    return 1;
+}
+
+static int process_file(const char *input_path, const char *output_directory)
+{
     size_t length;
-    char *input = read_file(argv[1], &length);
+    char *input = read_file(input_path, &length);
 
     if (input == NULL) {
         return 1;
     }
 
-    int status = evaluate_input(input, length, stdout);
-    free(input);
+    const char *base = strrchr(input_path, '/');
+    base = base == NULL ? input_path : base + 1;
 
-    if (fflush(stdout) != 0) {
-        fprintf(stderr, "Could not write results\n");
+    size_t base_length = strlen(base);
+
+    // Remove only the final .txt, keeping the rest of the filename.
+    if (base_length >= 4 &&
+        strcmp(base + base_length - 4, ".txt") == 0) {
+        base_length -= 4;
+    }
+
+    char *stem = malloc(base_length + 1);
+
+    if (stem == NULL) {
+        fprintf(stderr, "Not enough memory for output filename\n");
+        free(input);
         return 1;
     }
 
+    memcpy(stem, base, base_length);
+    stem[base_length] = '\0';
+
+    // Measure first so the output path has no fixed length limit.
+    int needed = snprintf(NULL, 0, "%s/%s_abhishek_bisht_241ADB121.txt",
+                          output_directory, stem);
+
+    if (needed < 0) {
+        fprintf(stderr, "Could not create output filename\n");
+        free(stem);
+        free(input);
+        return 1;
+    }
+
+    char *output_path = malloc((size_t)needed + 1);
+
+    if (output_path == NULL) {
+        fprintf(stderr, "Not enough memory for output path\n");
+        free(stem);
+        free(input);
+        return 1;
+    }
+
+    snprintf(output_path, (size_t)needed + 1,
+             "%s/%s_abhishek_bisht_241ADB121.txt",
+             output_directory, stem);
+    free(stem);
+
+    FILE *output = fopen(output_path, "w");
+
+    if (output == NULL) {
+        perror(output_path);
+        free(output_path);
+        free(input);
+        return 1;
+    }
+
+    int status = evaluate_input(input, length, output);
+    free(input);
+
+    // Buffered writes can fail when the file is closed too.
+    if (fclose(output) != 0) {
+        perror(output_path);
+        status = 1;
+    }
+
+    free(output_path);
     return status;
+}
+
+int main(int argc, char *argv[])
+{
+    const char *input_path = NULL;
+    const char *output_directory = NULL;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-o") == 0 ||
+            strcmp(argv[i], "--output-dir") == 0) {
+            if (output_directory != NULL || i + 1 >= argc) {
+                fprintf(stderr, "Provide one output directory\n");
+                return 1;
+            }
+
+            output_directory = argv[++i];
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            return 1;
+        } else {
+            if (input_path != NULL) {
+                fprintf(stderr, "Provide only one input file\n");
+                return 1;
+            }
+
+            input_path = argv[i];
+        }
+    }
+
+    if (input_path == NULL || output_directory == NULL) {
+        fprintf(stderr, "Usage: %s -o OUTDIR input.txt\n", argv[0]);
+        return 1;
+    }
+
+    if (create_output_directory(output_directory) != 0) {
+        return 1;
+    }
+
+    return process_file(input_path, output_directory);
 }
