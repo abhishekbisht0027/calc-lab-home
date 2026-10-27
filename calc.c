@@ -50,19 +50,100 @@ static void advance(Lexer *lexer)
     }
 }
 
+static void next_token(Lexer *lexer)
+{
+    while (lexer->index < lexer->length &&
+           (lexer->text[lexer->index] == ' ' ||
+            lexer->text[lexer->index] == '\t')) {
+        advance(lexer);
+    }
+
+    lexer->token = (Token){0};
+
+    // The index starts at 0, but file positions start at 1.
+    lexer->token.position = lexer->index + 1;
+
+    if (lexer->index == lexer->length) {
+        lexer->token.type = TOKEN_END_FILE;
+        return;
+    }
+
+    char c = lexer->text[lexer->index];
+
+    if (c >= '0' && c <= '9') {
+        long long value = 0;
+
+        while (lexer->index < lexer->length) {
+            c = lexer->text[lexer->index];
+
+            if (c < '0' || c > '9') {
+                break;
+            }
+
+            value = value * 10 + (c - '0');
+            advance(lexer);
+        }
+
+        lexer->token.type = TOKEN_NUMBER;
+        lexer->token.value.integer = value;
+        return;
+    }
+
+    advance(lexer);
+
+    switch (c) {
+        case '+':
+            lexer->token.type = TOKEN_PLUS;
+            break;
+        case '-':
+            lexer->token.type = TOKEN_MINUS;
+            break;
+        case '*':
+            lexer->token.type = TOKEN_MULTIPLY;
+            break;
+        case '/':
+            lexer->token.type = TOKEN_DIVIDE;
+            break;
+        case '(':
+            lexer->token.type = TOKEN_LEFT_PAREN;
+            break;
+        case ')':
+            lexer->token.type = TOKEN_RIGHT_PAREN;
+            break;
+        case '\n':
+            lexer->token.type = TOKEN_END_LINE;
+            break;
+        default:
+            lexer->token.type = TOKEN_INVALID;
+            break;
+    }
+}
+
 int main(void)
 {
+    const char input[] = "12 + 3";
     Lexer lexer = {
-        .text = "12 + 3",
-        .length = 6,
+        .text = input,
+        .length = sizeof(input) - 1,
         .index = 0
     };
 
-    // Count spaces too because error positions include every character.
-    while (lexer.index < lexer.length) {
-        printf("%c: %zu\n",
-               lexer.text[lexer.index], lexer.index + 1);
-        advance(&lexer);
+    for (;;) {
+        next_token(&lexer);
+
+        if (lexer.token.type == TOKEN_END_FILE) {
+            break;
+        }
+
+        if (lexer.token.type == TOKEN_NUMBER) {
+            printf("Number %lld at %zu\n",
+                   lexer.token.value.integer,
+                   lexer.token.position);
+        } else {
+            printf("Token %d at %zu\n",
+                   (int)lexer.token.type,
+                   lexer.token.position);
+        }
     }
 
     return 0;
