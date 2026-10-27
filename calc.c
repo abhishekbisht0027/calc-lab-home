@@ -307,12 +307,15 @@ static Number calculate(Parser *parser, Number left, Number right,
 static Number parse_power(Parser *parser)
 {
     Number result = parse_primary(parser);
+
     if (parser->error_position) {
         return result;
     }
 
     if (parser->lexer.token.type == TOKEN_POWER) {
+        size_t operator_position = parser->lexer.token.position;
         next_token(&parser->lexer);
+
         size_t exponent_position = parser->lexer.token.position;
 
         // Calling this function again makes 2**3**2 mean 2**(3**2).
@@ -322,8 +325,23 @@ static Number parse_power(Parser *parser)
             return result;
         }
 
+        // A float on either side means negative exponents are allowed.
+        if (result.is_float || exponent.is_float) {
+            double answer = pow(as_double(result), as_double(exponent));
+
+            if (!isfinite(answer)) {
+                // Infinite or NaN results point to the power operator.
+                set_error(parser, operator_position);
+                return result;
+            }
+
+            result.is_float = 1;
+            result.decimal = answer;
+            return result;
+        }
+
         if (exponent.integer < 0) {
-            // A negative integer exponent is reported where it starts.
+            // Only integer powers reject a negative exponent.
             set_error(parser, exponent_position);
             return result;
         }
@@ -332,7 +350,7 @@ static Number parse_power(Parser *parser)
         long long power = exponent.integer;
         long long answer = 1;
 
-        // Squaring the base avoids multiplying once for every exponent step.
+        // Squaring avoids multiplying once for every exponent step.
         while (power > 0) {
             if (power % 2 != 0) {
                 answer *= base;
@@ -340,13 +358,13 @@ static Number parse_power(Parser *parser)
 
             power /= 2;
 
-            // No final square is needed once the exponent is used up.
+            // Avoid an unnecessary square after the last step.
             if (power > 0) {
                 base *= base;
             }
         }
 
-        // Starting at 1 also gives the required answer for 0**0.
+        // Starting at 1 also handles the required 0**0 case.
         result.integer = answer;
     }
 
@@ -409,7 +427,7 @@ static Number parse_expression(Parser *parser)
 
 int main(void)
 {
-    const char input[] = "0.1 + 0.2";
+    const char input[] = "2 ** (1 - 2)";
     Parser parser = {
         .lexer = {
             .text = input,
