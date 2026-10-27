@@ -8,6 +8,7 @@
 // https://www.gnu.org/software/libc/manual/html_node/Parsing-of-Floats.html
 
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef enum {
     TOKEN_NUMBER,
@@ -89,21 +90,61 @@ static void next_token(Lexer *lexer)
     }
 
     if (c >= '0' && c <= '9') {
-        long long value = 0;
+        size_t start = lexer->index;
 
-        while (lexer->index < lexer->length) {
-            c = lexer->text[lexer->index];
-
-            if (c < '0' || c > '9') {
-                break;
-            }
-
-            value = value * 10 + (c - '0');
+        while (lexer->index < lexer->length &&
+               lexer->text[lexer->index] >= '0' &&
+               lexer->text[lexer->index] <= '9') {
             advance(lexer);
         }
 
+        int is_float = 0;
+
+        if (lexer->index < lexer->length &&
+            lexer->text[lexer->index] == '.') {
+            size_t dot_position = lexer->index + 1;
+            advance(lexer);
+
+            // Digits are required after the dot, so 5. is invalid.
+            if (lexer->index == lexer->length ||
+                lexer->text[lexer->index] < '0' ||
+                lexer->text[lexer->index] > '9') {
+                lexer->token.type = TOKEN_INVALID;
+                lexer->token.position = dot_position;
+                return;
+            }
+
+            is_float = 1;
+
+            while (lexer->index < lexer->length &&
+                   lexer->text[lexer->index] >= '0' &&
+                   lexer->text[lexer->index] <= '9') {
+                advance(lexer);
+            }
+        }
+
         lexer->token.type = TOKEN_NUMBER;
-        lexer->token.value.integer = value;
+        lexer->token.value.is_float = is_float;
+
+        if (is_float) {
+            char *end;
+            double value = strtod(lexer->text + start, &end);
+
+            // strtod accepts exponents, but our number rules do not.
+            if (end != lexer->text + lexer->index) {
+                lexer->token.type = TOKEN_INVALID;
+                lexer->token.position = lexer->index + 1;
+                return;
+            }
+
+            lexer->token.value.decimal = value;
+        } else {
+            // Convert only after checking for a dot: a float may exceed
+            // the integer range even when its double value is valid.
+            lexer->token.value.integer =
+                strtoll(lexer->text + start, NULL, 10);
+        }
+
         return;
     }
 
@@ -309,7 +350,7 @@ static Number parse_expression(Parser *parser)
 
 int main(void)
 {
-    const char input[] = "5 ** 0 + 0 ** 0";
+    const char input[] = "1.5e3";
     Parser parser = {
         .lexer = {
             .text = input,
@@ -328,6 +369,8 @@ int main(void)
 
     if (parser.error_position) {
         printf("ERROR:%zu\n", parser.error_position);
+    } else if (result.is_float) {
+        printf("%.15g\n", result.decimal);
     } else {
         printf("%lld\n", result.integer);
     }
