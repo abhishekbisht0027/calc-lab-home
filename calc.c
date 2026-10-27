@@ -425,22 +425,110 @@ static Number parse_expression(Parser *parser)
     return result;
 }
 
-int main(void)
+static char *read_file(const char *path, size_t *length)
 {
-    const char input[] = "2 ** (1 - 2)";
+    FILE *file = fopen(path, "rb");
+
+    if (file == NULL) {
+        perror(path);
+        return NULL;
+    }
+
+    size_t capacity = 8192;
+    char *text = malloc(capacity);
+
+    if (text == NULL) {
+        fprintf(stderr, "Not enough memory to read input\n");
+        fclose(file);
+        return NULL;
+    }
+
+    *length = 0;
+
+    for (;;) {
+        if (*length == capacity - 1) {
+            if (capacity > (size_t)-1 / 2) {
+                fprintf(stderr, "Input is too large\n");
+                free(text);
+                fclose(file);
+                return NULL;
+            }
+
+            // Double the space so large files do not need constant copying.
+            size_t new_capacity = capacity * 2;
+            char *larger = realloc(text, new_capacity);
+
+            if (larger == NULL) {
+                fprintf(stderr, "Not enough memory to read input\n");
+                free(text);
+                fclose(file);
+                return NULL;
+            }
+
+            text = larger;
+            capacity = new_capacity;
+        }
+
+        size_t count = fread(text + *length, 1,
+                             capacity - *length - 1, file);
+        *length += count;
+
+        if (count == 0) {
+            if (ferror(file)) {
+                fprintf(stderr, "Could not read input: %s\n", path);
+                free(text);
+                fclose(file);
+                return NULL;
+            }
+
+            break;
+        }
+    }
+
+    // The conversion functions need a zero byte after the input.
+    text[*length] = '\0';
+
+    if (fclose(file) != 0) {
+        perror(path);
+        free(text);
+        return NULL;
+    }
+
+    return text;
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s input.txt\n", argv[0]);
+        return 1;
+    }
+
+    size_t length;
+    char *input = read_file(argv[1], &length);
+
+    if (input == NULL) {
+        return 1;
+    }
+
     Parser parser = {
         .lexer = {
             .text = input,
-            .length = sizeof(input) - 1
+            .length = length
         }
     };
 
     next_token(&parser.lexer);
     Number result = parse_expression(&parser);
 
+    // A final newline is allowed after the expression.
+    while (!parser.error_position &&
+           parser.lexer.token.type == TOKEN_END_LINE) {
+        next_token(&parser.lexer);
+    }
+
     if (!parser.error_position &&
         parser.lexer.token.type != TOKEN_END_FILE) {
-        // Any leftover token means the expression is not complete.
         set_error(&parser, parser.lexer.token.position);
     }
 
@@ -452,5 +540,6 @@ int main(void)
         printf("%lld\n", result.integer);
     }
 
+    free(input);
     return 0;
 }
