@@ -13,6 +13,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 typedef enum {
     TOKEN_NUMBER,
@@ -747,9 +748,118 @@ static char *default_output_directory(const char *input_path,
     return directory;
 }
 
+typedef struct FileEntry {
+    char *path;
+    struct FileEntry *next;
+} FileEntry;
+
+static int process_directory(const char *input_directory,
+                             const char *output_directory)
+{
+    DIR *directory = opendir(input_directory);
+
+    if (directory == NULL) {
+        perror(input_directory);
+        return 1;
+    }
+
+    FileEntry *files = NULL;
+    int status = 0;
+
+    // Collect inputs first so newly written outputs are not read as inputs.
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(directory);
+
+        if (entry == NULL) {
+            if (errno != 0) {
+                perror(input_directory);
+                status = 1;
+            }
+
+            break;
+        }
+
+        size_t length = strlen(entry->d_name);
+
+        if (length < 4 ||
+            strcmp(entry->d_name + length - 4, ".txt") != 0) {
+            continue;
+        }
+
+        int needed = snprintf(NULL, 0, "%s/%s",
+                              input_directory, entry->d_name);
+
+        if (needed < 0) {
+            fprintf(stderr, "Could not create input path\n");
+            status = 1;
+            break;
+        }
+
+        char *path = malloc((size_t)needed + 1);
+
+        if (path == NULL) {
+            fprintf(stderr, "Not enough memory for input path\n");
+            status = 1;
+            break;
+        }
+
+        snprintf(path, (size_t)needed + 1, "%s/%s",
+                 input_directory, entry->d_name);
+
+        struct stat info;
+
+        if (stat(path, &info) != 0) {
+            perror(path);
+            free(path);
+            status = 1;
+            continue;
+        }
+
+        // A folder ending in .txt is still a folder, so skip it.
+        if (!S_ISREG(info.st_mode)) {
+            free(path);
+            continue;
+        }
+
+        FileEntry *item = malloc(sizeof(*item));
+
+        if (item == NULL) {
+            fprintf(stderr, "Not enough memory for input list\n");
+            free(path);
+            status = 1;
+            break;
+        }
+
+        item->path = path;
+        item->next = files;
+        files = item;
+    }
+
+    if (closedir(directory) != 0) {
+        perror(input_directory);
+        status = 1;
+    }
+
+    while (files != NULL) {
+        FileEntry *item = files;
+        files = item->next;
+
+        if (process_file(item->path, output_directory) != 0) {
+            status = 1;
+        }
+
+        free(item->path);
+        free(item);
+    }
+
+    return status;
+}
+
 int main(int argc, char *argv[])
 {
     const char *input_path = NULL;
+    const char *input_directory = NULL;
     const char *output_directory = NULL;
 
     for (int i = 1; i < argc; i++) {
@@ -761,6 +871,14 @@ int main(int argc, char *argv[])
             }
 
             output_directory = argv[++i];
+        } else if (strcmp(argv[i], "-d") == 0 ||
+                   strcmp(argv[i], "--dir") == 0) {
+            if (input_directory != NULL || i + 1 >= argc) {
+                fprintf(stderr, "Provide one input directory\n");
+                return 1;
+            }
+
+            input_directory = argv[++i];
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 1;
@@ -774,15 +892,35 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (input_path == NULL) {
-        fprintf(stderr, "Usage: %s [-o OUTDIR] input.txt\n", argv[0]);
+    if ((input_path == NULL && input_directory == NULL) ||
+        (input_path != NULL && input_directory != NULL)) {
+        fprintf(stderr,
+                "Usage: %s [-o OUTDIR] input.txt\n"
+                "       %s -d DIR [-o OUTDIR]\n",
+                argv[0], argv[0]);
+        return 1;
+    }
+
+    int directory_mode = input_directory != NULL;
+    const char *source = directory_mode ? input_directory : input_path;
+    struct stat info;
+
+    if (stat(source, &info) != 0) {
+        perror(source);
+        return 1;
+    }
+
+    if ((directory_mode && !S_ISDIR(info.st_mode)) ||
+        (!directory_mode && !S_ISREG(info.st_mode))) {
+        fprintf(stderr, "Wrong input type: %s\n", source);
         return 1;
     }
 
     char *default_directory = NULL;
 
     if (output_directory == NULL) {
-        default_directory = default_output_directory(input_path, 0);
+        default_directory =
+            default_output_directory(source, directory_mode);
 
         if (default_directory == NULL) {
             return 1;
@@ -796,7 +934,14 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    int status = process_file(input_path, output_directory);
+    int status;
+
+    if (directory_mode) {
+        status = process_directory(input_directory, output_directory);
+    } else {
+        status = process_file(input_path, output_directory);
+    }
+
     free(default_directory);
     return status;
 }
