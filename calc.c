@@ -7,6 +7,8 @@
 // https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
 // GNU C Library manual - reference for converting text to double:
 // https://www.gnu.org/software/libc/manual/html_node/Parsing-of-Floats.html
+// Additional learning chat - explanations, examples and code review:
+// https://chatgpt.com/share/6ae167f8-7b10-83ed-b134-48edc4236ba9
 
 #include <stdio.h>
 #include <stdlib.h>
