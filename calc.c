@@ -1,7 +1,8 @@
 // Abhishek Bisht 241ADB121
 // Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
 // Resources used:
-// OpenAI ChatGPT - help with design, code, explanations and testing.
+// OpenAI ChatGPT - help with design, code, explanations and testing and  explanations of compiler warnings,
+// sanitizers, and edge cases for testing the calculator.
 // GCC manual - reference for compiler warning options:
 // https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
 // GNU C Library manual - reference for converting text to double:
@@ -56,6 +57,10 @@ static void advance(Lexer *lexer)
         lexer->index++;
     }
 }
+
+// Additional AI help (ChatGPT): explanations of token positions and numbers.
+// Prompts asked what a token stores, how positions are counted, and
+// why .5, 5. and 1.5e3 are invalid in this assignment.
 
 static void next_token(Lexer *lexer)
 {
@@ -133,6 +138,8 @@ static void next_token(Lexer *lexer)
 
         if (is_float) {
             char *end;
+            // GNU C Library manual: strtod conversion and its end pointer.
+            // https://www.gnu.org/software/libc/manual/html_node/Parsing-of-Floats.html
             double value = strtod(lexer->text + start, &end);
 
             // strtod accepts exponents, but our number rules do not.
@@ -241,6 +248,10 @@ static Number parse_primary(Parser *parser)
     return result;
 }
 
+// Additional ChatGPT help: explanation and a small example of choosing
+// integer or double arithmetic with an is_float flag.
+// A float result keeps its type even when it prints without a decimal point.
+
 static double as_double(Number number)
 {
     return number.is_float ? number.decimal : (double)number.integer;
@@ -309,6 +320,9 @@ static Number calculate(Parser *parser, Number left, Number right,
     return result;
 }
 
+// Additional ChatGPT help: explanation and a small linked-list example
+// for storing pending powers, evaluating right to left, and freeing
+// remaining entries after an error.
 typedef struct PowerEntry {
     Number base;
     size_t operator_position;
@@ -453,6 +467,10 @@ static Number parse_expression(Parser *parser)
     return result;
 }
 
+// Additional ChatGPT help: explanation and a small buffer-growth example.
+// Topics included doubling capacity, handling realloc failure safely,
+// and reserving one extra byte for '\0'.
+
 static char *read_file(const char *path, size_t *length)
 {
     FILE *file = fopen(path, "rb");
@@ -524,6 +542,10 @@ static char *read_file(const char *path, size_t *length)
 
     return text;
 }
+
+// Additional ChatGPT help: storing results until the whole file is checked,
+// keeping the first error, and distinguishing expression errors from
+// file or output failures.
 
 static int evaluate_input(const char *input, size_t length, FILE *output)
 {
@@ -783,6 +805,9 @@ typedef struct FileEntry {
     struct FileEntry *next;
 } FileEntry;
 
+// Additional ChatGPT help: selecting .txt files with directory functions
+// and stat, and collecting paths before creating output files.
+
 static int process_directory(const char *input_directory,
                              const char *output_directory)
 {
@@ -885,6 +910,9 @@ static int process_directory(const char *input_directory,
 
     return status;
 }
+
+// Additional ChatGPT help: understanding argc, argv, option parsing,
+// input-source checks, and default output folder names.
 
 int main(int argc, char *argv[])
 {
